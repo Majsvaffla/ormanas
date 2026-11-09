@@ -43,3 +43,6 @@ def main() -> None:
         hostname=arguments.hostname,
     )
     arguments.output_path.write_text(module_source, encoding="utf-8")
+
+if __name__ == "__main__":
+    main()

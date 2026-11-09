@@ -4,13 +4,13 @@ import socket
 import time
 from machine import Pin, PWM
 
-import wifi_credentials
+import device_config
 
 CHANNEL_PINS = {
-    "red": 3,
-    "green": 4,
-    "blue": 5,
     "white": 2,
+    "red": 3,
+    "blue": 4,
+    "green": 5,
 }
 
 GAMMA = 2.2
@@ -30,12 +30,12 @@ def set_channel(channel_name: str, value: int) -> None:
 def connect_to_wifi(timeout_seconds: int = 20) -> str:
     wlan = network.WLAN(network.STA_IF)
     try:
-        network.hostname("ormanas")
+        network.hostname(device_config.hostname)
     except Exception:
         pass
     wlan.active(True)
     if not wlan.isconnected():
-        wlan.connect(wifi_credentials.ssid, wifi_credentials.password)
+        wlan.connect(device_config.ssid, device_config.password)
         deadline = time.ticks_add(time.ticks_ms(), timeout_seconds * 1000)
         while not wlan.isconnected():
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
