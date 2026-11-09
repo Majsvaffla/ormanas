@@ -1,33 +1,20 @@
+import asyncio
 import json
 import network
-import socket
 import time
-from machine import Pin, PWM
+from machine import Pin
 
 import device_config
+import lights
+import scheduler
+import sequences
 
-CHANNEL_PINS = {
-    "white": 2,
-    "red": 3,
-    "blue": 4,
-    "green": 5,
-}
-
-GAMMA = 2.2
 PAGE_PATH = "index.html"
 
-pwm_outputs = {name: PWM(Pin(gpio), freq=1000) for name, gpio in CHANNEL_PINS.items()}
-levels = {name: 0 for name in CHANNEL_PINS}
+status_led = Pin("LED", Pin.OUT)
 
 
-def set_channel(channel_name: str, value: int) -> None:
-    """Set one channel, 0-255, gamma corrected so dimming looks linear."""
-    value = max(0, min(255, int(value)))
-    levels[channel_name] = value
-    pwm_outputs[channel_name].duty_u16(int((value / 255) ** GAMMA * 65535))
-
-
-def connect_to_wifi(timeout_seconds: int = 20) -> str:
+def connect_to_wifi(timeout_seconds=20):
     wlan = network.WLAN(network.STA_IF)
     try:
         network.hostname(device_config.hostname)
@@ -41,12 +28,20 @@ def connect_to_wifi(timeout_seconds: int = 20) -> str:
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 raise RuntimeError("Wi-Fi connection timed out")
             time.sleep(0.2)
-    status_led = Pin("LED", Pin.OUT)
-    status_led.on()
     return wlan.ifconfig()[0]
 
 
-def parse_query_string(path: str) -> dict:
+def synchronise_clock():
+    try:
+        import ntptime
+
+        ntptime.settime()
+        print("clock synchronised")
+    except Exception as error:
+        print("clock sync failed:", error)
+
+
+def parse_query_string(path):
     if "?" not in path:
         return {}
     parameters = {}
@@ -57,85 +52,162 @@ def parse_query_string(path: str) -> dict:
     return parameters
 
 
-def apply_parameters(parameters: dict) -> None:
-    for channel_name, raw_value in parameters.items():
-        if channel_name in pwm_outputs:
-            try:
-                set_channel(channel_name, int(raw_value))
-            except ValueError:
-                pass
-
-
-def send_header(connection, content_type: str, status: str = "200 OK") -> None:
-    connection.send(
+async def send_response(writer, body, content_type="application/json", status="200 OK"):
+    writer.write(
         "HTTP/1.0 {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n".format(
             status, content_type
-        )
+        ).encode()
     )
+    if isinstance(body, str):
+        body = body.encode()
+    writer.write(body)
+    await writer.drain()
 
 
-def send_page(connection) -> None:
+async def send_page(writer):
     try:
         page_file = open(PAGE_PATH, "rb")
     except OSError:
-        send_header(connection, "text/plain", "404 Not Found")
-        connection.send("index.html is missing from the board")
+        await send_response(
+            writer, "index.html is missing", "text/plain", "404 Not Found"
+        )
         return
-    send_header(connection, "text/html; charset=utf-8")
+    writer.write(
+        b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+        b"Connection: close\r\n\r\n"
+    )
     try:
         while True:
             chunk = page_file.read(512)
             if not chunk:
                 break
-            connection.send(chunk)
+            writer.write(chunk)
+            await writer.drain()
     finally:
         page_file.close()
 
 
-def handle_connection(connection) -> None:
-    request_line = connection.readline() or b""
-    while True:
-        header_line = connection.readline()
-        if not header_line or header_line == b"\r\n":
-            break
+def status_document():
+    now = scheduler.local_time()
+    return {
+        "hostname": device_config.hostname,
+        "levels": lights.current_levels(),
+        "sequence": sequences.running_name(),
+        "clock_set": scheduler.clock_is_set(),
+        "local_time": "{:04d}-{:02d}-{:02d} {:02d}:{:02d}".format(
+            now[0], now[1], now[2], now[3], now[4]
+        ),
+    }
 
-    try:
-        path = request_line.decode().split(" ")[1]
-    except IndexError:
-        send_header(connection, "text/plain", "400 Bad Request")
-        return
 
-    if path.startswith("/set"):
-        apply_parameters(parse_query_string(path))
-        send_header(connection, "application/json")
-        connection.send(json.dumps(levels))
+async def route(method, path, body, writer):
+    if path == "/" or path.startswith("/?"):
+        await send_page(writer)
+
+    elif path.startswith("/set"):
+        sequences.stop()
+        lights.set_levels(
+            {
+                name: int(value)
+                for name, value in parse_query_string(path).items()
+                if name in lights.CHANNEL_PINS and value.lstrip("-").isdigit()
+            }
+        )
+        await send_response(writer, json.dumps(lights.current_levels()))
+
     elif path.startswith("/state"):
-        send_header(connection, "application/json")
-        connection.send(json.dumps(levels))
-    elif path == "/" or path.startswith("/?"):
-        send_page(connection)
-    else:
-        send_header(connection, "text/plain", "404 Not Found")
-        connection.send("not found")
+        await send_response(writer, json.dumps(lights.current_levels()))
 
+    elif path.startswith("/status"):
+        await send_response(writer, json.dumps(status_document()))
 
-def serve_forever(port: int = 80) -> None:
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("0.0.0.0", port))
-    listener.listen(2)
-    while True:
-        connection = None
+    elif path == "/stop":
+        sequences.stop()
+        await send_response(writer, json.dumps({"stopped": True}))
+
+    elif path == "/sequences" and method == "GET":
+        await send_response(writer, json.dumps(sequences.library))
+
+    elif path == "/sequences" and method in ("PUT", "POST"):
+        incoming = json.loads(body)
+        if sequences.running_name() not in incoming:
+            sequences.stop()
+        sequences.library.clear()
+        sequences.library.update(incoming)
+        sequences.save()
+        await send_response(writer, json.dumps(sequences.library))
+
+    elif path.startswith("/sequences/") and path.endswith("/run"):
+        name = path[len("/sequences/") : -len("/run")]
         try:
-            connection, _ = listener.accept()
-            handle_connection(connection)
-        except Exception as error:
-            print("request failed:", error)
-        finally:
-            if connection is not None:
-                connection.close()
+            sequences.start(name)
+        except KeyError:
+            await send_response(
+                writer,
+                json.dumps({"error": "no such sequence"}),
+                status="404 Not Found",
+            )
+            return
+        await send_response(writer, json.dumps({"running": name}))
+
+    elif path == "/schedules" and method == "GET":
+        await send_response(writer, json.dumps(scheduler.schedules))
+
+    elif path == "/schedules" and method in ("PUT", "POST"):
+        scheduler.schedules[:] = json.loads(body)
+        scheduler.save()
+        await send_response(writer, json.dumps(scheduler.schedules))
+
+    else:
+        await send_response(writer, "not found", "text/plain", "404 Not Found")
 
 
-address = connect_to_wifi()
-print("listening on http://{}/".format(address))
-serve_forever()
+async def handle_client(reader, writer):
+    try:
+        request_line = await reader.readline()
+        content_length = 0
+        while True:
+            header_line = await reader.readline()
+            if not header_line or header_line == b"\r\n":
+                break
+            name, _, value = header_line.decode().partition(":")
+            if name.strip().lower() == "content-length":
+                content_length = int(value.strip())
+
+        body = b""
+        while len(body) < content_length:
+            chunk = await reader.read(content_length - len(body))
+            if not chunk:
+                break
+            body += chunk
+
+        parts = request_line.decode().split(" ")
+        if len(parts) < 2:
+            await send_response(writer, "bad request", "text/plain", "400 Bad Request")
+        else:
+            await route(parts[0], parts[1], body.decode(), writer)
+    except Exception as error:
+        print("request failed:", error)
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def main():
+    address = connect_to_wifi()
+    status_led.on()
+    print("listening on http://{}/".format(address))
+
+    synchronise_clock()
+    await asyncio.start_server(handle_client, "0.0.0.0", 80)
+    asyncio.create_task(scheduler.run_forever())
+
+    while True:
+        await asyncio.sleep(3600)
+        synchronise_clock()
+
+
+asyncio.run(main())

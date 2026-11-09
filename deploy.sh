@@ -18,18 +18,18 @@ fi
 
 export WIFI_SSID WIFI_PASSWORD
 
-echo "Building index.html"
-python build.py
-
 staging_directory="$(mktemp --directory)"
 trap 'rm -rf "$staging_directory"' EXIT
 
+echo "Building index.html"
+python build_markup.py > "$staging_directory/index.html"
+
 echo "Rendering device config for $device_hostname"
-python render_device_config.py --hostname "$device_hostname" "$staging_directory/device_config.py"
+python render_device_config.py "$device_hostname" > "$staging_directory/device_config.py"
 
 echo "Copying files to $serial_port"
 mpremote connect "$serial_port" fs cp "$staging_directory/device_config.py" :device_config.py
-mpremote connect "$serial_port" fs cp index.html :index.html
+mpremote connect "$serial_port" fs cp "$staging_directory/index.html" :index.html
 mpremote connect "$serial_port" fs cp pico.py :main.py
 
 echo "Resetting"

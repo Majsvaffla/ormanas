@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -11,6 +12,7 @@ from htpy import (
     button,
     div,
     h1,
+    h2,
     head,
     html,
     label,
@@ -31,8 +33,12 @@ STYLESHEET: Final[str] = """
 body { font-family: system-ui, sans-serif; max-width: 32em; margin: 2em auto; padding: 0 1em; }
 label { display: block; margin: 1.5em 0; text-transform: capitalize; }
 input[type=range] { width: 100%; }
+h2 { font-size: 1em; text-transform: uppercase; letter-spacing: 0.08em;
+     opacity: 0.6; margin-top: 2em; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(8em, 1fr)); gap: 0.6em; }
 button { padding: 0.8em 1.4em; font-size: 1em; border: 1px solid #8884;
          border-radius: 0.5em; background: #8881; cursor: pointer; }
+button:active { background: #8884; }
 #status { margin-top: 2em; font-size: 0.85em; opacity: 0.6; }
 """
 
@@ -87,6 +93,29 @@ function allOff() {
   scheduleFlush();
 }
 
+function runSequence(name) {
+  fetch('/sequences/' + name + '/run').then(refreshStatus);
+}
+
+function stopSequence() {
+  fetch('/stop').then(refreshStatus);
+}
+
+function loadSequences() {
+  fetch('/sequences').then(function (response) {
+    return response.json();
+  }).then(function (library) {
+    var container = document.getElementById('sequences');
+    container.textContent = '';
+    Object.keys(library).forEach(function (name) {
+      var element = document.createElement('button');
+      element.textContent = name;
+      element.onclick = function () { runSequence(name); };
+      container.appendChild(element);
+    });
+  });
+}
+
 function refreshStatus() {
   fetch('/status').then(function (response) {
     return response.json();
@@ -106,6 +135,7 @@ window.addEventListener('load', function () {
       if (slider) { slider.value = levels[channel]; }
     });
   });
+  loadSequences();
   refreshStatus();
 });
 """ % SEND_INTERVAL_MILLISECONDS
@@ -145,6 +175,9 @@ def build_document() -> Element:
                     [channel_slider(name) for name in CHANNEL_NAMES]
                 ],
                 p[button(onclick="allOff()")["All off"]],
+                h2["Sequences"],
+                div(id="sequences", class_="grid"),
+                p[button(onclick="stopSequence()")["Stop sequence"]],
                 p(id="status"),
             ],
             script[Markup(channel_declaration() + BROWSER_SCRIPT)],
@@ -153,4 +186,4 @@ def build_document() -> Element:
 
 
 if __name__ == "__main__":
-    print(str(build_document()), encoding="utf-8")
+    sys.stdout.write(str(build_document()))

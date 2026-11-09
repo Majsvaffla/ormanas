@@ -43,6 +43,11 @@
         ];
         text = builtins.readFile ./deploy.sh;
       };
+      push-sequences = pkgs.writeShellApplication {
+        name = "push-sequences";
+        runtimeInputs = [ pythonForBuildingPages pkgs.curl ];
+        text = builtins.readFile ./push_sequences.sh;
+      };
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -51,6 +56,7 @@
           pkgs.mpremote
           python.pkgs.httpx
           deploy
+          push-sequences
         ];
       };
     };

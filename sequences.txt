@@ -1,0 +1,20 @@
+# Levels are 0-255, in RGBW order. Durations: 400ms, 3s, 2m, 1h.
+
+sequence sunrise
+    0    0    0    0
+   80    0    0    0    fade 1m
+  170  130    0    0    fade 2m
+  255  255  255  255    fade 5m
+
+sequence slow-pulse repeat
+  white=200    fade 3s
+  white=20     fade 3s
+
+sequence evening
+  160   60    0   80    fade 2s
+
+sequence police repeat
+  255    0    0    0    hold 150ms
+    0    0    0    0    hold  80ms
+    0    0  255    0    hold 150ms
+    0    0    0    0    hold  80ms
