@@ -21,7 +21,7 @@ staging_directory="$(mktemp --directory)"
 trap 'rm -rf "$staging_directory"' EXIT
 
 echo "Compiling sequences"
-python parse_sequences.py sequences.txt "$staging_directory/sequences.json"
+python parse_sequences.py sequences.txt > "$staging_directory/sequences.json"
 
 for host in "${target_hosts[@]}"; do
     url="http://$host.local"

@@ -21,6 +21,7 @@ from htpy import (
     p,
     script,
     style,
+    textarea,
     title,
 )
 from htpy import input as input_element
@@ -39,6 +40,9 @@ h2 { font-size: 1em; text-transform: uppercase; letter-spacing: 0.08em;
 button { padding: 0.8em 1.4em; font-size: 1em; border: 1px solid #8884;
          border-radius: 0.5em; background: #8881; cursor: pointer; }
 button:active { background: #8884; }
+textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.9em;
+            padding: 0.6em; box-sizing: border-box; }
+#sequence-message { font-size: 0.85em; opacity: 0.7; min-height: 1.2em; }
 #status { margin-top: 2em; font-size: 0.85em; opacity: 0.6; }
 """
 
@@ -116,6 +120,28 @@ function loadSequences() {
   });
 }
 
+function saveSequenceText() {
+  var message = document.getElementById('sequence-message');
+  message.textContent = 'Saving...';
+  fetch('/sequences/text', {
+    method: 'PUT',
+    body: document.getElementById('sequence-text').value
+  }).then(function (response) {
+    return response.json().then(function (payload) {
+      return { ok: response.ok, payload: payload };
+    });
+  }).then(function (result) {
+    if (result.ok) {
+      message.textContent = 'Saved. Library: ' + result.payload.join(', ');
+      loadSequences();
+    } else {
+      message.textContent = result.payload.error;
+    }
+  }).catch(function () {
+    message.textContent = 'Request failed';
+  });
+}
+
 function refreshStatus() {
   fetch('/status').then(function (response) {
     return response.json();
@@ -178,6 +204,15 @@ def build_document() -> Element:
                 h2["Sequences"],
                 div(id="sequences", class_="grid"),
                 p[button(onclick="stopSequence()")["Stop sequence"]],
+                h2["Add a sequence"],
+                textarea(
+                    id="sequence-text",
+                    rows="10",
+                    spellcheck="false",
+                    placeholder="sequence evening\n  160  60   0  80   fade 2s",
+                ),
+                p[button(onclick="saveSequenceText()")["Save"]],
+                p(id="sequence-message"),
                 p(id="status"),
             ],
             script[Markup(channel_declaration() + BROWSER_SCRIPT)],

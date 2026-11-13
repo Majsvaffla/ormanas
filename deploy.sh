@@ -31,7 +31,7 @@ echo "Copying files to $serial_port"
 for built_file in index.html device_config.py; do
     mpremote connect "$serial_port" fs cp "$staging_directory/$built_file" ":$built_file"
 done
-for module_file in lights.py storage.py sequences.py scheduler.py; do
+for module_file in lights.py storage.py sequences.py scheduler.py sequence_text.py; do
     mpremote connect "$serial_port" fs cp "$module_file" ":$module_file"
 done
 mpremote connect "$serial_port" fs cp pico.py :main.py

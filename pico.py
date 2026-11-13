@@ -7,6 +7,7 @@ from machine import Pin
 import device_config
 import lights
 import scheduler
+import sequence_text
 import sequences
 
 PAGE_PATH = "index.html"
@@ -136,6 +137,20 @@ async def route(method, path, body, writer):
         sequences.library.update(incoming)
         sequences.save()
         await send_response(writer, json.dumps(sequences.library))
+
+    elif path == "/sequences/text" and method in ("PUT", "POST"):
+        try:
+            parsed = sequence_text.parse_sequences(body)
+        except sequence_text.SequenceSyntaxError as error:
+            await send_response(
+                writer, json.dumps({"error": str(error)}), status="400 Bad Request"
+            )
+            return
+        if sequences.running_name() in parsed:
+            sequences.stop()
+        sequences.library.update(parsed)
+        sequences.save()
+        await send_response(writer, json.dumps(list(sequences.library.keys())))
 
     elif path.startswith("/sequences/") and path.endswith("/run"):
         name = path[len("/sequences/") : -len("/run")]
