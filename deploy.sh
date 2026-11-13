@@ -28,8 +28,12 @@ echo "Rendering device config for $device_hostname"
 python render_device_config.py "$device_hostname" > "$staging_directory/device_config.py"
 
 echo "Copying files to $serial_port"
-mpremote connect "$serial_port" fs cp "$staging_directory/device_config.py" :device_config.py
-mpremote connect "$serial_port" fs cp "$staging_directory/index.html" :index.html
+for built_file in index.html device_config.py; do
+    mpremote connect "$serial_port" fs cp "$staging_directory/$built_file" ":$built_file"
+done
+for module_file in lights.py storage.py sequences.py scheduler.py; do
+    mpremote connect "$serial_port" fs cp "$module_file" ":$module_file"
+done
 mpremote connect "$serial_port" fs cp pico.py :main.py
 
 echo "Resetting"
